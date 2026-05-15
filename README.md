@@ -6,85 +6,103 @@ Repo: <https://github.com/OmKulkarni09/TODO>
 
 ---
 
-## 🚀 Quick start (for teammates pulling this repo)
+## 🚀 Quick start — **one command**
 
-You need three things installed:
+Prerequisites (one-time installs):
 - **Git** ([download](https://git-scm.com/downloads))
 - **Python 3.10+** ([download](https://www.python.org/downloads/))
 - **Node.js 18+** ([download](https://nodejs.org/))
 
-Then, open a terminal and run:
-
-### 1 · Clone the repo
+### Clone, then run:
 
 ```bash
 git clone https://github.com/OmKulkarni09/TODO.git
 cd TODO
 ```
 
-### 2 · Start the backend (Terminal 1)
-
 <details open>
-<summary><b>Windows · PowerShell</b></summary>
+<summary><b>🪟 Windows · PowerShell</b></summary>
 
 ```powershell
-cd backend
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-uvicorn main:app --reload --port 8000
+.\start.ps1
 ```
 
-> If PowerShell blocks the activation script with `running scripts is disabled`, either run:
-> `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` (one-time)
-> or skip activation and call the venv's python directly: `.\.venv\Scripts\python.exe -m uvicorn main:app --reload --port 8000`
+> If PowerShell blocks the script with *"running scripts is disabled"*, run this **once** then retry:
+> ```powershell
+> Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+> ```
 
 </details>
 
-<details>
-<summary><b>macOS / Linux · bash or zsh</b></summary>
+<details open>
+<summary><b>🐧 macOS / Linux · bash or zsh</b></summary>
 
 ```bash
-cd backend
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-uvicorn main:app --reload --port 8000
+chmod +x start.sh    # one-time, makes the script executable
+./start.sh
 ```
 
 </details>
 
-When you see `Uvicorn running on http://127.0.0.1:8000`, the API is up. Visit <http://localhost:8000/docs> for the interactive Swagger UI.
+That's it. The script will:
 
-On first start, a SQLite file `todos.db` is created and seeded with four default categories: **Personal**, **Work**, **Health**, **Learning**.
+1. Verify Python and Node are installed (clear error if not)
+2. Create the Python venv (first run only, ~10s)
+3. Install backend deps via `pip` (first run only, ~30s)
+4. Install frontend deps via `npm` (first run only, ~1 min)
+5. Boot the backend on `:8000` and the frontend on `:5173`
+6. **Auto-open your browser to <http://localhost:5173>**
 
-### 3 · Start the frontend (Terminal 2)
+Subsequent runs skip the install steps — you go from `./start.sh` to a working app in ~3 seconds.
 
-Open a **second terminal** (leave the backend running in the first):
+**Stop:** press `Ctrl+C` once. The script kills both processes cleanly.
 
+> First start creates `backend/todos.db` (a SQLite file) and seeds four default categories. All your data lives in that file and persists across restarts.
+
+### Optional: run the tests
+
+```bash
+# Backend (133 tests, ~6s)
+cd backend
+.venv/bin/pytest          # macOS/Linux
+# .venv\Scripts\pytest    # Windows
+
+# Frontend (66 tests, ~9s)
+cd frontend
+npm test
+```
+
+Full docs in [TESTING.md](TESTING.md).
+
+---
+
+## Manual setup (alternative)
+
+If you'd rather not use the startup script, here's the same thing done by hand:
+
+<details>
+<summary>Manual two-terminal flow</summary>
+
+**Terminal 1 — backend:**
+```bash
+cd backend
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1     # Windows
+# source .venv/bin/activate      # macOS/Linux
+pip install -r requirements.txt
+uvicorn main:app --reload --port 8000
+```
+
+**Terminal 2 — frontend:**
 ```bash
 cd frontend
 npm install
 npm run dev
 ```
 
-When you see `Local: http://localhost:5173/`, open that URL in your browser. **You should see the app.** 🎉
+Open <http://localhost:5173>.
 
-### 4 · Run the tests (optional sanity check)
-
-To confirm everything works end-to-end:
-
-```bash
-# Backend (Terminal 1, with venv activated)
-cd backend
-pytest
-
-# Frontend (Terminal 2)
-cd frontend
-npm test
-```
-
-Both should report all green (133 backend + 66 frontend = 202 tests). Full docs in [TESTING.md](TESTING.md).
+</details>
 
 ---
 
@@ -110,6 +128,8 @@ Both should report all green (133 backend + 66 frontend = 202 tests). Full docs 
 
 ```
 TODO/
+├── start.sh               # ← one-command launcher for macOS/Linux
+├── start.ps1              # ← one-command launcher for Windows
 ├── backend/
 │   ├── main.py            # FastAPI app + routes + lifespan migrations
 │   ├── crud.py            # DB ops, recurrence math, series cascade
@@ -170,12 +190,15 @@ TODO/
 
 | Symptom | Fix |
 |---|---|
-| `python: command not found` on macOS | Use `python3` and `python3 -m venv .venv` |
-| `node: command not found` after install | Restart your terminal so PATH picks up the new install, then try again |
-| PowerShell blocks venv activation | `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` (or skip activation and use `.venv\Scripts\python.exe` directly) |
-| Backend starts but frontend shows blank/network errors | Make sure the backend is still running on port 8000 — Vite proxies `/api/*` to it |
-| Port 8000 or 5173 already in use | Kill the other process, or change ports: backend `uvicorn ... --port 8001` and update `frontend/vite.config.js` proxy target |
-| `npm install` fails on Windows due to long paths | Run `git config --system core.longpaths true` once, then retry |
+| `./start.sh: Permission denied` (Linux/macOS) | Run `chmod +x start.sh` once, then retry |
+| PowerShell: *"running scripts is disabled on this system"* | Run **once**: `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`, then retry `.\start.ps1` |
+| `python: command not found` on macOS | Install via [python.org](https://www.python.org/downloads/) or `brew install python`. The script tries both `python3` and `python`. |
+| `node: command not found` after fresh install | Restart your terminal so PATH picks up Node, then re-run the start script |
+| Backend starts but frontend shows blank/network errors | Backend is probably crashing — check the script output. Vite proxies `/api/*` to `:8000`, so backend must be up. |
+| Port 8000 or 5173 already in use | Kill the other process (`lsof -ti:8000 \| xargs kill` on macOS/Linux, or use Resource Monitor on Windows). Then re-run. |
+| `npm install` fails on Windows with long-path errors | Run **once**: `git config --system core.longpaths true`, then retry |
+| Want to wipe install and start over | Delete `backend/.venv` and `frontend/node_modules`, then re-run the start script |
+| Want to wipe all your tasks | Delete `backend/todos.db` — it'll be re-created empty on next start |
 
 ## Deploying
 
