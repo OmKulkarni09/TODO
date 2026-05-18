@@ -19,15 +19,23 @@ The code is already prepared for deployment:
 ## Step 1 · Deploy the backend to Render (~3 min)
 
 1. Go to <https://dashboard.render.com/register> and sign up with your GitHub account (no credit card needed).
-2. Click **New +** → **Blueprint** → connect your `OmKulkarni09/TODO` repo.
-3. Render reads [`render.yaml`](render.yaml) and proposes a service called `venom-todo-api`. Click **Apply**.
+2. Click **New +** → **Blueprint** (NOT *Web Service* — see warning below) → connect your `OmKulkarni09/TODO` repo.
+3. Render reads [`render.yaml`](render.yaml) and proposes a service called `venom-todo-api` with root directory, build/start commands, Python version, and an auto-generated `SECRET_KEY` all pre-filled. Click **Apply**.
 4. Wait ~2 minutes for the first deploy. When done, copy the URL Render gives you — it'll look like:
    ```
    https://venom-todo-api.onrender.com
    ```
 5. Test the API:
    - Visit `<your-url>/docs` — you should see the Swagger UI.
-   - Visit `<your-url>/` — should return `{"name": "Modern Todo API", "status": "ok"}`.
+   - Visit `<your-url>/` — should return `{"name": "venOM Todo API", "status": "ok"}`.
+
+> ⚠️ **Important — use Blueprint, not Web Service.** The *Web Service* button in the *New +* menu **ignores `render.yaml`** and uses the latest Python version with repo-root defaults — neither of which works for this project. If you've already created a *Web Service* by mistake, either delete it and redo via Blueprint, or fix it manually:
+>
+> - **Settings → Build & Deploy → Root Directory** = `backend`
+> - **Settings → Build & Deploy → Build Command** = `pip install -r requirements.txt`
+> - **Settings → Build & Deploy → Start Command** = `uvicorn main:app --host 0.0.0.0 --port $PORT`
+> - **Environment → Add**: `PYTHON_VERSION=3.12.7`, `SECRET_KEY=<click Generate>`, `CORS_ORIGINS=*`
+> - **Manual Deploy → Deploy latest commit**
 
 > 📝 **Free tier note** — Render free web services sleep after 15 min of no traffic. The first request after sleep takes ~30s to wake up. Also, the disk is *ephemeral* — every redeploy wipes the SQLite DB. For personal use this is usually fine; if you need persistent data, upgrade to a paid plan or switch to Render's free Postgres (see the "Persistent data" section below).
 
