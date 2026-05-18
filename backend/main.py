@@ -1,3 +1,4 @@
+import os
 from contextlib import asynccontextmanager
 from typing import List, Optional
 
@@ -59,9 +60,15 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(title="Modern Todo API", lifespan=lifespan)
 
+# CORS — in dev, allow everything. In prod (e.g. Render), set CORS_ORIGINS
+# to a comma-separated list of the frontend's URL(s), e.g.
+#   CORS_ORIGINS=https://venom-todo.vercel.app
+_cors_env = os.getenv("CORS_ORIGINS", "*").strip()
+_origins = ["*"] if _cors_env == "*" else [o.strip() for o in _cors_env.split(",") if o.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

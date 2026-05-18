@@ -1,140 +1,137 @@
-# Deployment
+# Deployment — get a public URL for free
 
-Two parts to ship:
-- **Source code → GitHub** (always step 1)
-- **Live app → a hosting provider** (frontend + backend, each can go to a different place)
+This guide deploys the app to two free services that auto-redeploy on every `git push`:
 
-GitHub itself only hosts static sites via GitHub Pages — and venOM has a Python backend, so you'll deploy the backend to a free service (Render / Railway / Fly.io) and the frontend either to GitHub Pages or Vercel/Netlify.
+- **Frontend → Vercel** — free, no sleep, custom domain, fast CDN
+- **Backend → Render** — free, sleeps after 15 min idle (~30s cold start), good enough for personal use
+
+End result: you get a URL like `https://venom-todo.vercel.app` you can share with anyone.
+
+> ⚠️ **Important caveat — single shared database.** The app has no auth, so every visitor uses the **same** database. Fine for personal use across your own devices, or sharing with a small trusted group. Not suitable for public sharing where strangers shouldn't see each other's tasks.
+
+The code is already prepared for this:
+- `frontend/src/api.js` reads `VITE_API_BASE` (set on Vercel)
+- `backend/main.py` reads `CORS_ORIGINS` (set on Render)
+- `render.yaml` bootstraps the backend service for you
 
 ---
 
-## Part 1 — Push the code to GitHub
+## Step 1 · Deploy the backend to Render (~3 min)
 
-### Step 1: Create a GitHub repository
+1. Go to <https://dashboard.render.com/register> and sign up with your GitHub account (no credit card needed).
+2. Click **New +** → **Blueprint** → connect your `OmKulkarni09/TODO` repo.
+3. Render reads [`render.yaml`](render.yaml) and proposes a service called `venom-todo-api`. Click **Apply**.
+4. Wait ~2 minutes for the first deploy. When done, copy the URL Render gives you — it'll look like:
+   ```
+   https://venom-todo-api.onrender.com
+   ```
+5. Test the API:
+   - Visit `<your-url>/docs` — you should see the Swagger UI.
+   - Visit `<your-url>/` — should return `{"name": "Modern Todo API", "status": "ok"}`.
 
-In a browser, go to <https://github.com/new>:
-- **Repository name**: `venom-todo` (or whatever you like)
-- **Private or Public**: your choice
-- ⚠️ **Do NOT** check "Add a README", "Add .gitignore", or "Choose a license" — we already have these locally and the repo needs to be empty for the first push to work cleanly.
+> 📝 **Free tier note** — Render free web services sleep after 15 min of no traffic. The first request after sleep takes ~30s to wake up. Also, the disk is *ephemeral* — every redeploy wipes the SQLite DB. For personal use this is usually fine; if you need persistent data, upgrade to a paid plan or switch to Render's free Postgres (see the "Persistent data" section below).
 
-Click *Create repository*. You'll see a quick-start page with a URL like `https://github.com/<your-username>/venom-todo.git`. Keep that tab open.
+---
 
-### Step 2: Initialize the local repo
+## Step 2 · Deploy the frontend to Vercel (~2 min)
 
-Open PowerShell in the project folder (`todo-app/`) and run:
+1. Go to <https://vercel.com/signup> and sign up with your GitHub account.
+2. Click **Add New** → **Project** → import your `OmKulkarni09/TODO` repo.
+3. Configure:
+   - **Root Directory**: `frontend` ← click *Edit* and set this
+   - Framework Preset: should auto-detect as **Vite** ✓
+   - Build Command: `npm run build` (auto-filled)
+   - Output Directory: `dist` (auto-filled)
+4. Expand **Environment Variables** and add one:
+   - **Name**: `VITE_API_BASE`
+   - **Value**: the Render URL from Step 1 (e.g. `https://venom-todo-api.onrender.com`)
+5. Click **Deploy**. Wait ~1 minute.
+6. Vercel gives you a URL like `https://todo-omkulkarni09.vercel.app`. **This is your shareable link.** 🎉
 
-```powershell
-git init
-git branch -M main
+---
+
+## Step 3 · Lock CORS (recommended, 30 seconds)
+
+By default the backend allows all origins (`*`). Tighten it to just your Vercel URL:
+
+1. Back in **Render dashboard → your service → Environment**
+2. Add (or edit) the `CORS_ORIGINS` env var:
+   - **Name**: `CORS_ORIGINS`
+   - **Value**: your Vercel URL (e.g. `https://todo-omkulkarni09.vercel.app`)
+3. Save — Render redeploys automatically (~1 min).
+
+Now only your frontend can hit the API. If you ever change the Vercel URL (e.g. custom domain), update this value.
+
+---
+
+## You're done
+
+Visit your Vercel URL. The app boots up, your tasks persist (until the next backend redeploy on free tier), and you can share the link with anyone.
+
+**Routine workflow from now on:**
+```bash
+# Make changes locally, test with ./start.sh / .\start.ps1
 git add .
-git commit -m "Initial commit — venOM todo app"
+git commit -m "describe what changed"
+git push
 ```
 
-The first commit will include the backend, frontend, tests, docs, and ignore the things in `.gitignore` (your `.venv`, `node_modules`, the local SQLite DB, etc.).
+That single `git push` triggers:
+1. GitHub Actions runs both test suites (133 backend + 66 frontend)
+2. Render rebuilds + redeploys the API (~1-2 min)
+3. Vercel rebuilds + redeploys the frontend (~30s)
 
-If `git config user.email` and `user.name` haven't been set globally, set them once:
-
-```powershell
-git config --global user.email "you@example.com"
-git config --global user.name "Your Name"
-```
-
-### Step 3: Push to GitHub
-
-Copy the remote URL from the GitHub page, then:
-
-```powershell
-git remote add origin https://github.com/<your-username>/venom-todo.git
-git push -u origin main
-```
-
-The first push prompts for your GitHub credentials. On Windows, **Git Credential Manager** handles this — it opens a browser window to sign in. Subsequent pushes are silent.
-
-### Step 4: Verify
-
-Refresh the GitHub repo page — you should see all your files, plus a green checkmark in a minute or two when the CI workflow finishes running both test suites (it's wired up in `.github/workflows/test.yml`).
+All three run in parallel.
 
 ---
 
-## Part 2 — Deploy the live app
+## Alternative: Railway (better for persistent data)
 
-The frontend is a static SPA after `npm run build`. The backend is a FastAPI app that needs a Python runtime.
+Render's free tier wipes the SQLite DB on every redeploy. If you want data to **persist across deploys**, use Railway instead:
 
-**Recommended free-tier combo:** Vercel (frontend) + Render (backend). Both deploy directly from your GitHub repo with no machine setup.
+1. Go to <https://railway.app> → sign in with GitHub.
+2. **New Project** → **Deploy from GitHub repo** → pick your repo.
+3. Railway detects the backend automatically. Configure:
+   - **Service settings → Root directory**: `backend`
+   - **Service settings → Start command**: `uvicorn main:app --host 0.0.0.0 --port $PORT`
+   - **Volumes** → attach a 1GB volume at `/app/backend` (or wherever `todos.db` lives)
+4. Railway gives you a backend URL. Use it as `VITE_API_BASE` on Vercel exactly like Step 2 above.
 
-### A) Backend on Render
-
-1. Go to <https://render.com> and sign in with GitHub.
-2. Click **New +** → **Web Service** → select your `venom-todo` repo.
-3. Configure:
-   - **Name**: `venom-todo-api`
-   - **Root Directory**: `backend`
-   - **Runtime**: Python 3
-   - **Build Command**: `pip install -r requirements.txt`
-   - **Start Command**: `uvicorn main:app --host 0.0.0.0 --port $PORT`
-   - **Instance Type**: Free
-4. Click *Create Web Service*. Wait ~2 minutes for the first deploy.
-5. Copy the public URL Render gives you (something like `https://venom-todo-api.onrender.com`). You'll need it for the frontend.
-
-**Note on SQLite + Render free tier**: Render's free tier has *ephemeral disk* — every redeploy wipes the local DB file. For a personal app that's fine if you don't mind. For persistent data, either:
-- Upgrade to a paid plan (gets persistent disk), OR
-- Swap SQLite for Render's free Postgres (a few-line change in `database.py`)
-
-### B) Frontend on Vercel
-
-1. Go to <https://vercel.com> and sign in with GitHub.
-2. Click **Add New** → **Project** → import your `venom-todo` repo.
-3. Configure:
-   - **Root Directory**: `frontend`
-   - Framework preset auto-detects as **Vite**
-   - **Build Command**: `npm run build` (auto-filled)
-   - **Output Directory**: `dist` (auto-filled)
-4. **Environment Variables** — add one:
-   - Name: `VITE_API_BASE`
-   - Value: the Render URL from step A.5 (e.g. `https://venom-todo-api.onrender.com`)
-5. Click *Deploy*. Wait ~1 minute.
-6. Copy Vercel's URL (something like `https://venom-todo.vercel.app`) and open it in your browser. 🎉
-
-> Note: the current frontend calls `/api/...` and Vite's dev proxy maps that to the backend at localhost. For production you need to point at the deployed backend. **See the small frontend change below.**
-
-#### Required frontend change for production
-
-Edit [`frontend/src/api.js`](frontend/src/api.js) to use the env var when present:
-
-```js
-const BASE = import.meta.env.VITE_API_BASE
-  ? `${import.meta.env.VITE_API_BASE}`
-  : '/api'   // dev — proxied to localhost:8000 by vite.config.js
-```
-
-Then in **Render → Settings → Environment**, add an env var on the backend:
-- Name: `CORS_ORIGINS`
-- Value: `https://venom-todo.vercel.app` (your Vercel URL)
-
-And update [`backend/main.py`](backend/main.py) CORS:
-
-```python
-import os
-origins = os.getenv("CORS_ORIGINS", "*").split(",")
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-```
-
-Commit, push — Render and Vercel both auto-redeploy on every push to `main`.
+Railway's free tier is **$5 of monthly credit** — enough to run a small app 24/7 without ever sleeping. When the credit runs out (rarely happens for personal use), the service pauses until next month.
 
 ---
 
-## Alternative: GitHub Pages (frontend only)
+## Persistent data option (Render + Postgres)
+
+If you want to stay on Render but need persistent data, replace SQLite with Render's free Postgres (300 MB free).
+
+1. **Render dashboard → New + → PostgreSQL** → name it `venom-todo-db`, free plan.
+2. Copy its **Internal Database URL** (e.g. `postgresql://user:pass@host/dbname`).
+3. In your backend's environment, add:
+   - **Name**: `DATABASE_URL`
+   - **Value**: that internal URL
+4. Update [`backend/database.py`](backend/database.py):
+   ```python
+   import os
+   DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./todos.db")
+   # For SQLite local dev, keep connect_args; for Postgres prod, drop it
+   if DATABASE_URL.startswith("sqlite"):
+       engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+   else:
+       engine = create_engine(DATABASE_URL)
+   ```
+5. Add `psycopg2-binary` to `backend/requirements.txt`.
+
+Now `todos.db` is used in dev, Postgres in prod. Data persists forever.
+
+---
+
+## GitHub Pages alternative for the frontend
 
 If you'd rather keep everything on GitHub:
 
 1. **Settings → Pages → Source: GitHub Actions**.
-2. Add a workflow file at `.github/workflows/deploy-pages.yml`:
+2. Add `.github/workflows/deploy-pages.yml`:
 
 ```yaml
 name: Deploy frontend to GitHub Pages
@@ -169,44 +166,21 @@ jobs:
       - uses: actions/deploy-pages@v4
 ```
 
-3. **Repository → Settings → Secrets and variables → Actions** — add `VITE_API_BASE` with your backend URL.
-4. Push to main. Within ~2 minutes the site is live at `https://<your-username>.github.io/venom-todo/`.
-
-⚠️ For GitHub Pages, you'll also need to set `base: '/venom-todo/'` in [`frontend/vite.config.js`](frontend/vite.config.js) so asset paths resolve correctly under the subpath. Vercel/Netlify don't need this.
-
----
-
-## Alternative: All-in-one with Railway
-
-If you want backend + frontend deployed together with the least clicks:
-
-1. Go to <https://railway.app> → New Project → Deploy from GitHub repo.
-2. Railway auto-detects both services. Configure each:
-   - **Backend service**: root `backend`, start `uvicorn main:app --host 0.0.0.0 --port $PORT`
-   - **Frontend service**: root `frontend`, start `npm run build && npx serve dist`
-3. Railway provides URLs for each service. Set frontend's `VITE_API_BASE` to the backend's URL.
-
-Railway's free credit lets you run this for free for a small personal app; beyond that you pay per usage.
+3. **Repository → Settings → Secrets and variables → Actions** — add `VITE_API_BASE` = your Render URL.
+4. Set `base: '/TODO/'` in `frontend/vite.config.js` (Pages serves under a subpath).
+5. Push to main. Within ~2 minutes, the site is live at `https://omkulkarni09.github.io/TODO/`.
 
 ---
 
-## Routine workflow after first deploy
+## Comparison table
 
-Once GitHub + Render + Vercel are connected, your loop becomes:
-
-```powershell
-# edit code locally
-git add .
-git commit -m "describe the change"
-git push
-```
-
-That single `git push` triggers:
-1. **GitHub Actions** — runs both test suites (backend pytest + frontend vitest). Red ✗ if anything broke.
-2. **Render** — pulls main, rebuilds, redeploys the API.
-3. **Vercel** — pulls main, rebuilds, redeploys the frontend.
-
-All three happen in parallel, complete in 1–3 minutes total, and you can watch progress live on each provider's dashboard.
+| Option | Frontend | Backend | Always-on backend? | DB persists between deploys? | Custom domain? | Difficulty |
+|---|---|---|---|---|---|---|
+| **Vercel + Render** (recommended) | Vercel | Render free | ✗ (sleeps 15 min) | ✗ (ephemeral disk) | ✓ both | Easiest |
+| **Vercel + Railway** | Vercel | Railway $5 credit | ✓ until credit runs out | ✓ with volume | ✓ both | Easy |
+| **Vercel + Render + Postgres** | Vercel | Render free | ✗ (sleeps) | ✓ (300MB free Postgres) | ✓ both | Medium |
+| **GitHub Pages + Render** | GitHub Pages | Render free | ✗ | ✗ | ✓ Pages only | Medium |
+| **Fly.io** (both services) | Fly | Fly | ✓ (free allowance) | ✓ (volumes) | ✓ | Hardest |
 
 ---
 
@@ -214,9 +188,10 @@ All three happen in parallel, complete in 1–3 minutes total, and you can watch
 
 | Symptom | Fix |
 |---|---|
-| `git push` asks for password | Set up Git Credential Manager (Windows installer includes it), or use a personal access token from <https://github.com/settings/tokens> as the password |
-| Render free tier is "sleeping" | Free Render web services sleep after 15 min of no traffic. First request after sleep takes ~30s while it wakes up. |
-| `CORS error` in browser console | Add your Vercel URL to `CORS_ORIGINS` env var on Render, then redeploy |
-| Frontend works but data calls 404 | Double-check `VITE_API_BASE` is set on Vercel — and that you re-deployed after setting it (env-var changes need a redeploy) |
-| GitHub Pages 404 on subpath | Set `base: '/<repo-name>/'` in `vite.config.js` |
-| Repo too big to push | Verify `.gitignore` is excluding `node_modules` and `.venv` (root-level `.gitignore` covers both) |
+| Frontend loads but `Failed to fetch` in console | `VITE_API_BASE` not set on Vercel, or the backend's URL is wrong. Check the value matches Render's URL exactly (incl. `https://`). |
+| `CORS error` blocked by browser | The Render backend's `CORS_ORIGINS` env var doesn't include your Vercel URL. Update it on Render and wait for redeploy. |
+| Render says *"deploy failed: pip install error"* | Most often a Python version mismatch — `render.yaml` pins 3.12. Check Render service logs. |
+| Render service sleeps after 15 min | This is the free-tier behavior. First request after sleep takes ~30s. Use Railway or paid Render plan for always-on. |
+| Data disappeared after I made a code change | Render's free tier disk is ephemeral — every redeploy wipes `todos.db`. Switch to Postgres (steps above) for persistence. |
+| Vercel build fails on `npm run build` | Run `npm run build` locally first to confirm it works. Most often a missing env var or a syntax error caught by Vite. |
+| First push to GitHub asked for password | On Windows, Git Credential Manager opens a browser to sign in to GitHub. On Linux/macOS, use a [personal access token](https://github.com/settings/tokens) as the password. |

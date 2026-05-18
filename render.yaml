@@ -1,0 +1,22 @@
+# Declarative Render config — used by the "Blueprint" deploy flow at
+# https://render.com/blueprints. Lets Render bootstrap the backend service
+# automatically when you point it at this repo.
+#
+# After Render finishes the first deploy, copy the public URL it gives you
+# (e.g. https://venom-todo-api.onrender.com) and set it as
+# VITE_API_BASE on your Vercel project — then add the Vercel URL back here
+# as CORS_ORIGINS via Render's dashboard.
+services:
+  - type: web
+    name: venom-todo-api
+    runtime: python
+    rootDir: backend
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12"
+      - key: CORS_ORIGINS
+        # Leave blank for "*" while testing; tighten to your Vercel URL once known.
+        sync: false

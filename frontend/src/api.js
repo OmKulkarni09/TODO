@@ -1,4 +1,9 @@
-const BASE = '/api'
+// In production, set VITE_API_BASE to the absolute backend URL
+// (e.g. https://venom-todo-api.onrender.com). In dev, the Vite proxy in
+// vite.config.js maps /api/* → http://localhost:8000.
+const BASE = import.meta.env.VITE_API_BASE
+  ? import.meta.env.VITE_API_BASE.replace(/\/$/, '')
+  : '/api'
 
 async function request(path, { method = 'GET', body } = {}) {
   const res = await fetch(`${BASE}${path}`, {
