@@ -1,8 +1,35 @@
 from datetime import datetime
 from typing import List, Optional
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
+
+# ---------- Auth ----------
+
+class UserCreate(BaseModel):
+    email: EmailStr
+    password: str = Field(min_length=6, max_length=128)
+
+
+class UserLogin(BaseModel):
+    email: EmailStr
+    password: str
+
+
+class User(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    email: EmailStr
+    created_at: datetime
+
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    user: User
+
+
+# ---------- Subtasks ----------
 
 class SubtaskBase(BaseModel):
     title: str
@@ -24,6 +51,8 @@ class Subtask(SubtaskBase):
     task_id: int
 
 
+# ---------- Categories ----------
+
 class CategoryBase(BaseModel):
     name: str
     color: str = "#6366f1"
@@ -43,6 +72,8 @@ class Category(CategoryBase):
     id: int
     created_at: datetime
 
+
+# ---------- Tasks ----------
 
 class TaskBase(BaseModel):
     title: str
@@ -82,6 +113,8 @@ class Task(TaskBase):
     category: Optional[Category] = None
     subtasks: List[Subtask] = []
 
+
+# ---------- Stats ----------
 
 class Stats(BaseModel):
     total: int

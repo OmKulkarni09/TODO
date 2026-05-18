@@ -7,12 +7,12 @@ This guide deploys the app to two free services that auto-redeploy on every `git
 
 End result: you get a URL like `https://venom-todo.vercel.app` you can share with anyone.
 
-> ⚠️ **Important caveat — single shared database.** The app has no auth, so every visitor uses the **same** database. Fine for personal use across your own devices, or sharing with a small trusted group. Not suitable for public sharing where strangers shouldn't see each other's tasks.
+> ✅ **Multi-user is now built in.** Each visitor registers their own account (email + password). Tasks, categories, and stats are scoped per-user — no one sees anyone else's data. Passwords are bcrypt-hashed; sessions use signed JWTs.
 
-The code is already prepared for this:
-- `frontend/src/api.js` reads `VITE_API_BASE` (set on Vercel)
-- `backend/main.py` reads `CORS_ORIGINS` (set on Render)
-- `render.yaml` bootstraps the backend service for you
+The code is already prepared for deployment:
+- `frontend/src/api.js` reads `VITE_API_BASE` (set on Vercel) and attaches the bearer token automatically
+- `backend/main.py` reads `CORS_ORIGINS` and `SECRET_KEY` (set on Render)
+- `render.yaml` bootstraps the backend service and **auto-generates** a `SECRET_KEY` on first deploy
 
 ---
 
@@ -192,6 +192,8 @@ jobs:
 | `CORS error` blocked by browser | The Render backend's `CORS_ORIGINS` env var doesn't include your Vercel URL. Update it on Render and wait for redeploy. |
 | Render says *"deploy failed: pip install error"* | Most often a Python version mismatch — `render.yaml` pins 3.12. Check Render service logs. |
 | Render service sleeps after 15 min | This is the free-tier behavior. First request after sleep takes ~30s. Use Railway or paid Render plan for always-on. |
-| Data disappeared after I made a code change | Render's free tier disk is ephemeral — every redeploy wipes `todos.db`. Switch to Postgres (steps above) for persistence. |
+| Data disappeared after I made a code change | Render's free tier disk is ephemeral — every redeploy wipes `todos.db` (your **users + tasks all reset**). Switch to Postgres (steps above) for persistence — strongly recommended once you have real users. |
+| All users got logged out after a redeploy | `SECRET_KEY` was regenerated. If you set it manually in Render, it stays stable; `generateValue: true` in `render.yaml` only generates it on FIRST deploy. |
 | Vercel build fails on `npm run build` | Run `npm run build` locally first to confirm it works. Most often a missing env var or a syntax error caught by Vite. |
+| Login works locally but fails on prod | Most often: backend's `CORS_ORIGINS` doesn't include your Vercel URL, OR `VITE_API_BASE` on Vercel is wrong. Check both. |
 | First push to GitHub asked for password | On Windows, Git Credential Manager opens a browser to sign in to GitHub. On Linux/macOS, use a [personal access token](https://github.com/settings/tokens) as the password. |

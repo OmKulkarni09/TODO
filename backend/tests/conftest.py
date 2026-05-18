@@ -21,6 +21,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from database import Base, get_db  # noqa: E402
 from main import app  # noqa: E402
+import auth  # noqa: E402
 import models  # noqa: E402,F401  (ensures table metadata is loaded)
 
 
@@ -50,12 +51,51 @@ def db_session(engine):
 
 @pytest.fixture()
 def client(engine):
-    """A FastAPI TestClient whose `get_db` is wired to the test engine.
+    """A FastAPI TestClient whose `get_db` is wired to the test engine AND
+    whose `get_current_user` returns a fixed test user. This lets all the
+    pre-existing tests (which were written before auth) act as a single
+    authenticated user without any code changes.
 
-    Note: TestClient doesn't run our lifespan (which seeds default categories
-    and runs migrations), so tests start with an empty DB by design. Use
-    `seeded_client` if you need defaults.
+    For tests that need to exercise auth itself (login, register, multi-user
+    isolation), use the `unauth_client` fixture instead — it doesn't override
+    `get_current_user`, so requests are subject to real bearer-token checks.
     """
+    SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+    def override_get_db():
+        db = SessionLocal()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    def override_current_user():
+        db = SessionLocal()
+        try:
+            user = db.query(models.User).filter_by(email="test@local").first()
+            if not user:
+                user = models.User(
+                    email="test@local",
+                    password_hash=auth.hash_password("password"),
+                )
+                db.add(user)
+                db.commit()
+                db.refresh(user)
+            return user
+        finally:
+            db.close()
+
+    app.dependency_overrides[get_db] = override_get_db
+    app.dependency_overrides[auth.get_current_user] = override_current_user
+    with TestClient(app) as c:
+        yield c
+    app.dependency_overrides.clear()
+
+
+@pytest.fixture()
+def unauth_client(engine):
+    """A TestClient without the get_current_user override — auth tests use
+    this to exercise the real bearer-token flow."""
     SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
     def override_get_db():

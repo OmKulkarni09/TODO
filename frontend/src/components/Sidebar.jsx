@@ -13,9 +13,11 @@ import {
   Pencil,
   Tag,
   X,
+  LogOut,
 } from 'lucide-react'
 import { VenomSpider } from './VenomSpider.jsx'
 import { useConfirm } from './ConfirmProvider.jsx'
+import { useAuth } from './AuthProvider.jsx'
 
 const VIEWS = [
   { id: 'dashboard', label: 'Dashboard', icon: BarChart3 },
@@ -49,6 +51,19 @@ export default function Sidebar({
   const [newColor, setNewColor] = useState(PRESET_COLORS[0])
   const [editingId, setEditingId] = useState(null)
   const confirm = useConfirm()
+  const { user, logout } = useAuth()
+
+  const handleLogout = async () => {
+    const ok = await confirm({
+      title: 'Sign out',
+      description: `You'll be signed out of ${user?.email || 'your account'}.`,
+      actions: [
+        { label: 'Cancel', value: false, variant: 'soft' },
+        { label: 'Sign out', value: true, variant: 'danger' },
+      ],
+    })
+    if (ok) logout()
+  }
 
   const counts = {
     today: stats?.due_today ?? 0,
@@ -249,11 +264,31 @@ export default function Sidebar({
         })}
       </div>
 
-      <div className="mt-auto pt-3">
+      <div className="mt-auto pt-3 space-y-2">
         <div className="rounded-xl border border-venom-300/15 bg-venom-300/[0.04] px-3 py-2 text-[11px] leading-relaxed text-slate-500 dark:text-slate-400">
           <span className="font-semibold text-venom-600 dark:text-venom-300">Tip ·</span>{' '}
           Star tasks you must close today. The hunt sharpens when the prey list is short.
         </div>
+        {user && (
+          <button
+            onClick={handleLogout}
+            className="group flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-xs transition-colors hover:bg-slate-100 dark:hover:bg-white/5"
+            title="Sign out"
+          >
+            <div className="min-w-0 flex-1">
+              <div className="font-semibold text-slate-700 dark:text-slate-200 truncate">
+                {user.email}
+              </div>
+              <div className="text-[10px] text-slate-500 dark:text-slate-400">
+                Signed in
+              </div>
+            </div>
+            <LogOut
+              size={14}
+              className="shrink-0 text-slate-400 group-hover:text-rose-500"
+            />
+          </button>
+        )}
       </div>
     </aside>
   )

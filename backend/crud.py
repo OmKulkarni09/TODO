@@ -41,22 +41,31 @@ def _next_due_date(rule: Optional[str], current: Optional[datetime]) -> Optional
     return None
 
 
-# ---------- Categories ----------
+# ---------- Categories (scoped to user) ----------
 
-def list_categories(db: Session):
-    return db.query(models.Category).order_by(models.Category.name).all()
+def list_categories(db: Session, user_id: int):
+    return (
+        db.query(models.Category)
+        .filter(models.Category.user_id == user_id)
+        .order_by(models.Category.name)
+        .all()
+    )
 
 
-def create_category(db: Session, data: schemas.CategoryCreate):
-    cat = models.Category(**data.model_dump())
+def create_category(db: Session, user_id: int, data: schemas.CategoryCreate):
+    cat = models.Category(**data.model_dump(), user_id=user_id)
     db.add(cat)
     db.commit()
     db.refresh(cat)
     return cat
 
 
-def update_category(db: Session, category_id: int, data: schemas.CategoryUpdate):
-    cat = db.query(models.Category).filter(models.Category.id == category_id).first()
+def update_category(db: Session, user_id: int, category_id: int, data: schemas.CategoryUpdate):
+    cat = (
+        db.query(models.Category)
+        .filter(models.Category.id == category_id, models.Category.user_id == user_id)
+        .first()
+    )
     if not cat:
         return None
     for k, v in data.model_dump(exclude_unset=True).items():
@@ -66,36 +75,47 @@ def update_category(db: Session, category_id: int, data: schemas.CategoryUpdate)
     return cat
 
 
-def delete_category(db: Session, category_id: int):
-    cat = db.query(models.Category).filter(models.Category.id == category_id).first()
+def delete_category(db: Session, user_id: int, category_id: int):
+    cat = (
+        db.query(models.Category)
+        .filter(models.Category.id == category_id, models.Category.user_id == user_id)
+        .first()
+    )
     if not cat:
         return False
-    db.query(models.Task).filter(models.Task.category_id == category_id).update(
-        {"category_id": None}
-    )
+    # Null out category_id on the user's tasks; don't cascade-delete tasks
+    db.query(models.Task).filter(
+        models.Task.category_id == category_id,
+        models.Task.user_id == user_id,
+    ).update({"category_id": None})
     db.delete(cat)
     db.commit()
     return True
 
 
-# ---------- Tasks ----------
+# ---------- Tasks (scoped to user) ----------
 
-def _task_query(db: Session):
-    return db.query(models.Task).options(
-        joinedload(models.Task.category),
-        joinedload(models.Task.subtasks),
+def _task_query(db: Session, user_id: int):
+    return (
+        db.query(models.Task)
+        .filter(models.Task.user_id == user_id)
+        .options(
+            joinedload(models.Task.category),
+            joinedload(models.Task.subtasks),
+        )
     )
 
 
 def list_tasks(
     db: Session,
+    user_id: int,
     status: Optional[str] = None,
     category_id: Optional[int] = None,
     priority: Optional[str] = None,
     search: Optional[str] = None,
     view: Optional[str] = None,
 ):
-    q = _task_query(db)
+    q = _task_query(db, user_id)
 
     if status:
         q = q.filter(models.Task.status == status)
@@ -143,19 +163,26 @@ def list_tasks(
     ).all()
 
 
-def get_task(db: Session, task_id: int):
-    return _task_query(db).filter(models.Task.id == task_id).first()
+def get_task(db: Session, user_id: int, task_id: int):
+    return (
+        _task_query(db, user_id)
+        .filter(models.Task.id == task_id)
+        .first()
+    )
 
 
-def create_task(db: Session, data: schemas.TaskCreate):
+def create_task(db: Session, user_id: int, data: schemas.TaskCreate):
     payload = data.model_dump(exclude={"subtasks"})
-    # If the caller creates a task already-completed (e.g. importing/seeding
-    # historical data), make sure completed_at is populated so downstream
-    # views (Recently Completed, calendar heat-map) don't filter it out.
     if payload.get("status") == "completed":
         payload.setdefault("completed_at", datetime.utcnow())
-    max_pos = db.query(func.max(models.Task.position)).scalar() or 0
+    max_pos = (
+        db.query(func.max(models.Task.position))
+        .filter(models.Task.user_id == user_id)
+        .scalar()
+        or 0
+    )
     payload["position"] = max_pos + 1
+    payload["user_id"] = user_id
     task = models.Task(**payload)
     db.add(task)
     db.flush()
@@ -165,26 +192,33 @@ def create_task(db: Session, data: schemas.TaskCreate):
             db.add(models.Subtask(task_id=task.id, **s.model_dump()))
 
     db.commit()
-    return get_task(db, task.id)
+    return get_task(db, user_id, task.id)
 
 
-def _delete_descendants(db: Session, parent_id: int) -> int:
-    """Recursively delete all tasks spawned from this one. Returns count deleted."""
+def _delete_descendants(db: Session, parent_id: int, user_id: int) -> int:
+    """Recursively delete all tasks spawned from this one (within the same user)."""
     children = (
         db.query(models.Task)
-        .filter(models.Task.parent_task_id == parent_id)
+        .filter(
+            models.Task.parent_task_id == parent_id,
+            models.Task.user_id == user_id,
+        )
         .all()
     )
     count = 0
     for c in children:
-        count += _delete_descendants(db, c.id)
+        count += _delete_descendants(db, c.id, user_id)
         db.delete(c)
         count += 1
     return count
 
 
-def update_task(db: Session, task_id: int, data: schemas.TaskUpdate):
-    task = db.query(models.Task).filter(models.Task.id == task_id).first()
+def update_task(db: Session, user_id: int, task_id: int, data: schemas.TaskUpdate):
+    task = (
+        db.query(models.Task)
+        .filter(models.Task.id == task_id, models.Task.user_id == user_id)
+        .first()
+    )
     if not task:
         return None
 
@@ -206,12 +240,14 @@ def update_task(db: Session, task_id: int, data: schemas.TaskUpdate):
     elif transitioning_from_complete:
         updates["completed_at"] = None
 
-    # Capture recurrence state BEFORE applying updates
     spawn_rule = task.recurrence
     spawn_anchor = task.due_date
     has_descendants = (
         db.query(models.Task.id)
-        .filter(models.Task.parent_task_id == task_id)
+        .filter(
+            models.Task.parent_task_id == task_id,
+            models.Task.user_id == user_id,
+        )
         .first()
         is not None
     )
@@ -219,15 +255,9 @@ def update_task(db: Session, task_id: int, data: schemas.TaskUpdate):
     for k, v in updates.items():
         setattr(task, k, v)
 
-    # On UN-completion: drop any spawned successors. They shouldn't exist
-    # if the parent isn't actually completed — otherwise the user sees
-    # duplicate-looking pending entries.
     if transitioning_from_complete:
-        _delete_descendants(db, task_id)
+        _delete_descendants(db, task_id, user_id)
 
-    # On COMPLETION: spawn the next occurrence ONLY if no successor exists
-    # yet. Prevents duplicate spawns from complete → un-complete → complete
-    # cycles.
     if (
         transitioning_to_complete
         and spawn_rule
@@ -236,7 +266,12 @@ def update_task(db: Session, task_id: int, data: schemas.TaskUpdate):
     ):
         next_due = _next_due_date(spawn_rule, spawn_anchor)
         if next_due:
-            max_pos = db.query(func.max(models.Task.position)).scalar() or 0
+            max_pos = (
+                db.query(func.max(models.Task.position))
+                .filter(models.Task.user_id == user_id)
+                .scalar()
+                or 0
+            )
             db.add(
                 models.Task(
                     title=task.title,
@@ -249,34 +284,44 @@ def update_task(db: Session, task_id: int, data: schemas.TaskUpdate):
                     recurrence=spawn_rule,
                     parent_task_id=task_id,
                     position=max_pos + 1,
+                    user_id=user_id,
                 )
             )
 
     db.commit()
-    return get_task(db, task_id)
+    return get_task(db, user_id, task_id)
 
 
-def delete_task(db: Session, task_id: int):
-    task = db.query(models.Task).filter(models.Task.id == task_id).first()
+def delete_task(db: Session, user_id: int, task_id: int):
+    task = (
+        db.query(models.Task)
+        .filter(models.Task.id == task_id, models.Task.user_id == user_id)
+        .first()
+    )
     if not task:
         return False
-    # Cascade: when a recurring parent is deleted, drop its lineage too
-    _delete_descendants(db, task_id)
+    _delete_descendants(db, task_id, user_id)
     db.delete(task)
     db.commit()
     return True
 
 
-def _find_series_root(db: Session, task_id: int):
-    """Walk parent_task_id chain back to the recurring series root."""
-    current = db.query(models.Task).filter(models.Task.id == task_id).first()
+def _find_series_root(db: Session, user_id: int, task_id: int):
+    current = (
+        db.query(models.Task)
+        .filter(models.Task.id == task_id, models.Task.user_id == user_id)
+        .first()
+    )
     if not current:
         return None
     safety = 500
     while current.parent_task_id is not None and safety > 0:
         parent = (
             db.query(models.Task)
-            .filter(models.Task.id == current.parent_task_id)
+            .filter(
+                models.Task.id == current.parent_task_id,
+                models.Task.user_id == user_id,
+            )
             .first()
         )
         if not parent:
@@ -286,22 +331,29 @@ def _find_series_root(db: Session, task_id: int):
     return current
 
 
-def delete_task_series(db: Session, task_id: int):
-    """Nuke an entire recurring series — find the root, then cascade-delete
-    everything spawned from it. Idempotent: deleting any member of a series
-    deletes the whole thing."""
-    root = _find_series_root(db, task_id)
+def delete_task_series(db: Session, user_id: int, task_id: int):
+    root = _find_series_root(db, user_id, task_id)
     if not root:
         return False
-    _delete_descendants(db, root.id)
+    _delete_descendants(db, root.id, user_id)
     db.delete(root)
     db.commit()
     return True
 
 
-# ---------- Subtasks ----------
+# ---------- Subtasks (scoped via parent task) ----------
 
-def add_subtask(db: Session, task_id: int, data: schemas.SubtaskCreate):
+def _owned_task(db: Session, user_id: int, task_id: int):
+    return (
+        db.query(models.Task)
+        .filter(models.Task.id == task_id, models.Task.user_id == user_id)
+        .first()
+    )
+
+
+def add_subtask(db: Session, user_id: int, task_id: int, data: schemas.SubtaskCreate):
+    if not _owned_task(db, user_id, task_id):
+        return None
     sub = models.Subtask(task_id=task_id, **data.model_dump())
     db.add(sub)
     db.commit()
@@ -309,8 +361,13 @@ def add_subtask(db: Session, task_id: int, data: schemas.SubtaskCreate):
     return sub
 
 
-def update_subtask(db: Session, subtask_id: int, data: schemas.SubtaskUpdate):
-    sub = db.query(models.Subtask).filter(models.Subtask.id == subtask_id).first()
+def update_subtask(db: Session, user_id: int, subtask_id: int, data: schemas.SubtaskUpdate):
+    sub = (
+        db.query(models.Subtask)
+        .join(models.Task, models.Task.id == models.Subtask.task_id)
+        .filter(models.Subtask.id == subtask_id, models.Task.user_id == user_id)
+        .first()
+    )
     if not sub:
         return None
     for k, v in data.model_dump(exclude_unset=True).items():
@@ -320,8 +377,13 @@ def update_subtask(db: Session, subtask_id: int, data: schemas.SubtaskUpdate):
     return sub
 
 
-def delete_subtask(db: Session, subtask_id: int):
-    sub = db.query(models.Subtask).filter(models.Subtask.id == subtask_id).first()
+def delete_subtask(db: Session, user_id: int, subtask_id: int):
+    sub = (
+        db.query(models.Subtask)
+        .join(models.Task, models.Task.id == models.Subtask.task_id)
+        .filter(models.Subtask.id == subtask_id, models.Task.user_id == user_id)
+        .first()
+    )
     if not sub:
         return False
     db.delete(sub)
@@ -329,57 +391,35 @@ def delete_subtask(db: Session, subtask_id: int):
     return True
 
 
-# ---------- Stats ----------
+# ---------- Stats (scoped to user) ----------
 
-def stats(db: Session):
+def stats(db: Session, user_id: int):
     now = datetime.utcnow()
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     today_end = today_start + timedelta(days=1)
 
-    total = db.query(func.count(models.Task.id)).scalar() or 0
-    completed = (
-        db.query(func.count(models.Task.id))
-        .filter(models.Task.status == "completed")
-        .scalar()
-        or 0
-    )
-    pending = (
-        db.query(func.count(models.Task.id))
-        .filter(models.Task.status == "pending")
-        .scalar()
-        or 0
-    )
-    in_progress = (
-        db.query(func.count(models.Task.id))
-        .filter(models.Task.status == "in_progress")
-        .scalar()
-        or 0
-    )
-    overdue = (
-        db.query(func.count(models.Task.id))
-        .filter(
-            and_(models.Task.due_date < now, models.Task.status != "completed")
+    base = db.query(models.Task).filter(models.Task.user_id == user_id)
+
+    total = base.count()
+    completed = base.filter(models.Task.status == "completed").count()
+    pending = base.filter(models.Task.status == "pending").count()
+    in_progress = base.filter(models.Task.status == "in_progress").count()
+    overdue = base.filter(
+        and_(models.Task.due_date < now, models.Task.status != "completed")
+    ).count()
+    due_today = base.filter(
+        and_(
+            models.Task.due_date >= today_start,
+            models.Task.due_date < today_end,
+            models.Task.status != "completed",
         )
-        .scalar()
-        or 0
-    )
-    due_today = (
-        db.query(func.count(models.Task.id))
-        .filter(
-            and_(
-                models.Task.due_date >= today_start,
-                models.Task.due_date < today_end,
-                models.Task.status != "completed",
-            )
-        )
-        .scalar()
-        or 0
-    )
+    ).count()
 
     completion_rate = round((completed / total) * 100, 1) if total else 0.0
 
     priority_rows = (
         db.query(models.Task.priority, func.count(models.Task.id))
+        .filter(models.Task.user_id == user_id)
         .group_by(models.Task.priority)
         .all()
     )
@@ -394,7 +434,14 @@ def stats(db: Session):
             models.Category.color,
             func.count(models.Task.id),
         )
-        .outerjoin(models.Task, models.Task.category_id == models.Category.id)
+        .outerjoin(
+            models.Task,
+            and_(
+                models.Task.category_id == models.Category.id,
+                models.Task.user_id == user_id,
+            ),
+        )
+        .filter(models.Category.user_id == user_id)
         .group_by(models.Category.id)
         .all()
     )
@@ -407,17 +454,12 @@ def stats(db: Session):
     for i in range(6, -1, -1):
         day_start = today_start - timedelta(days=i)
         day_end = day_start + timedelta(days=1)
-        cnt = (
-            db.query(func.count(models.Task.id))
-            .filter(
-                and_(
-                    models.Task.completed_at >= day_start,
-                    models.Task.completed_at < day_end,
-                )
+        cnt = base.filter(
+            and_(
+                models.Task.completed_at >= day_start,
+                models.Task.completed_at < day_end,
             )
-            .scalar()
-            or 0
-        )
+        ).count()
         seven.append({"date": day_start.strftime("%a"), "count": cnt})
 
     return schemas.Stats(

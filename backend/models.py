@@ -6,13 +6,33 @@ from sqlalchemy.orm import relationship
 from database import Base
 
 
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, index=True)
+    email = Column(String, unique=True, nullable=False, index=True)
+    password_hash = Column(String, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    categories = relationship(
+        "Category", back_populates="user", cascade="all, delete-orphan"
+    )
+    tasks = relationship(
+        "Task", back_populates="user", cascade="all, delete-orphan"
+    )
+
+
 class Category(Base):
     __tablename__ = "categories"
 
     id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, unique=True, nullable=False)
+    name = Column(String, nullable=False)
     color = Column(String, default="#6366f1")
     created_at = Column(DateTime, default=datetime.utcnow)
+
+    # user_id nullable for migration compatibility; app-layer enforces presence
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    user = relationship("User", back_populates="categories")
 
     tasks = relationship("Task", back_populates="category")
 
@@ -31,6 +51,10 @@ class Task(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     position = Column(Integer, default=0)
     is_starred = Column(Boolean, default=False)
+
+    # user_id nullable for migration compatibility; app-layer enforces presence
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    user = relationship("User", back_populates="tasks")
 
     category_id = Column(Integer, ForeignKey("categories.id"), nullable=True)
     category = relationship("Category", back_populates="tasks")

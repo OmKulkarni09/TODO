@@ -108,6 +108,7 @@ Open <http://localhost:5173>.
 
 ## Features
 
+- **Multi-user accounts** — each user registers their own email + password and sees only their own tasks, categories, and stats. Passwords are bcrypt-hashed, sessions use signed JWTs (30-day expiry).
 - **Smart views** — Today, Upcoming, Overdue, Starred, Completed, Calendar, plus per-category filters
 - **Calendar** — month-grid heat-map showing real and projected task density, with a day-detail panel and stats tiles
 - **Rich tasks** — title, description, priority (low/medium/high/urgent), due date & time, category, star, subtasks
