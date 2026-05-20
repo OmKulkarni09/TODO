@@ -109,28 +109,40 @@ Railway's free tier is **$5 of monthly credit** — enough to run a small app 24
 
 ---
 
-## Persistent data option (Render + Postgres)
+## Persistent data with Render + Postgres ⭐ recommended
 
-If you want to stay on Render but need persistent data, replace SQLite with Render's free Postgres (300 MB free).
+The code already supports Postgres — [`backend/database.py`](backend/database.py) reads `DATABASE_URL` from env, falling back to local SQLite when it's unset. To switch your deployed backend over:
 
-1. **Render dashboard → New + → PostgreSQL** → name it `venom-todo-db`, free plan.
-2. Copy its **Internal Database URL** (e.g. `postgresql://user:pass@host/dbname`).
-3. In your backend's environment, add:
+### 1. Create the Postgres database
+
+1. Render dashboard → **New +** → **Postgres** → free plan.
+2. Configure:
+   - **Name**: `venom-todo-db`
+   - **Database**: `venom_todo` (or leave default)
+   - **User**: leave default
+   - **Region**: same as your `venom-todo-api` service (important for low latency + Internal URL access)
+   - **Plan**: Free (300 MB, never expires)
+3. Click **Create Database**. Wait ~1 min for provisioning.
+
+### 2. Copy the Internal Database URL
+
+Once provisioned, scroll to **Connections** on the database page. Copy the **Internal Database URL** (the shorter one, e.g. `postgresql://venom_todo_user:abc...@dpg-xyz/venom_todo`).
+
+> Use the **Internal** URL, not External — it's faster (same datacenter as your web service) and doesn't count against connection limits.
+
+### 3. Wire the URL into your backend service
+
+1. Render dashboard → `venom-todo-api` → **Environment** (left sidebar)
+2. Click **Add Environment Variable**:
    - **Name**: `DATABASE_URL`
-   - **Value**: that internal URL
-4. Update [`backend/database.py`](backend/database.py):
-   ```python
-   import os
-   DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./todos.db")
-   # For SQLite local dev, keep connect_args; for Postgres prod, drop it
-   if DATABASE_URL.startswith("sqlite"):
-       engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
-   else:
-       engine = create_engine(DATABASE_URL)
-   ```
-5. Add `psycopg2-binary` to `backend/requirements.txt`.
+   - **Value**: paste the Internal Database URL from Step 2
+3. **Save Changes** — Render redeploys (~1 min)
 
-Now `todos.db` is used in dev, Postgres in prod. Data persists forever.
+### 4. Verify
+
+After redeploy, visit `<your-render-url>/docs`. The API is now backed by Postgres. **Every user + task lives forever** — no more wipes on redeploy or sleep.
+
+> 📝 **Migration note** — the SQLite data from before this change is GONE (it was on the ephemeral disk). Anyone who was registered before this switchover needs to re-register. Going forward, data persists across every push, sleep, and restart.
 
 ---
 
